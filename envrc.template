@@ -1,0 +1,14 @@
+export VIRTUAL_ENV=".venv"
+layout python3
+
+export RESTIC_PASSWORD=""
+export RESTIC_PASSWORD_FILE=""
+export VAULTWARDEN_NAMESPACE=""
+export VAULTWARDEN_STATEFULSET=""
+export VW_DATA_DIR="/data"
+export RESTIC_REPOSITORY=""
+export RCLONE_CONFIG="$HOME/.config/rclone/rclone.conf"
+export HOST_TAG=""
+export BACKUP_TAG=""
+export SCALE_DOWN_TIMEOUT_SECONDS=5
+export SCALE_DOWN_POLL_INTERVAL_SECONDS=5
