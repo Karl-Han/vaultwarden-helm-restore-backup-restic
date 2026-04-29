@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: vaultwarden-backup
+  name: vaultwarden-backup
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vaultwarden-backup
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: vaultwarden-backup
+    spec:
+      containers:
+      - image: docker.io/ttionya/vaultwarden-backup:latest
+        name: vaultwarden-backup
+        command:
+        - sleep
+        - "1800"
+        volumeMounts:
+        - name: pvc-data
+          mountPath: /bitwarden/data
+      volumes:
+        - name: pvc-data
+          persistentVolumeClaim:
+            claimName: vaultwarden-data-vaultwarden-0

@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-vaultwarden
+  labels:
+    app: nginx-vaultwarden
+spec:
+  ports:
+  - port: 80
+    name: vaultwarden
+  clusterIP: None
+  selector:
+    app: nginx-vaultwarden
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vaultwarden
+spec:
+  serviceName: "nginx-vaultwarden"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vaultwarden
+  template:
+    metadata:
+      labels:
+        app: vaultwarden
+    spec:
+      containers:
+      - name: vaultwarden
+        image: docker.io/vaultwarden/server:latest
+        ports:
+        - containerPort: 80
+          name: vaultwarden-web
+        volumeMounts:
+        - name: vaultwarden-data
+          mountPath: /data
+        # Mount the secret to the /ssl folder
+        - name: tls-secret-volume
+          mountPath: /ssl
+          readOnly: true
+        env:
+        # Notice we use tls.crt and tls.key because of how the Kubernetes TLS secret formats them
+        - name: ROCKET_TLS
+          value: '{certs="/ssl/tls.crt",key="/ssl/tls.key"}'
+      volumes:
+      - name: tls-secret-volume
+        secret:
+          secretName: vaultwarden-tls
+  volumeClaimTemplates:
+  - metadata:
+      name: vaultwarden-data
+    spec:
+      storageClassName: openebs-lvmpv
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi
+

@@ -1,0 +1,33 @@
+ARG RESTIC_IMAGE=docker.io/restic/restic:latest
+ARG RCLONE_IMAGE=docker.io/rclone/rclone:latest
+ARG PYTHON_IMAGE=python:3.12-slim
+
+FROM ${RESTIC_IMAGE} AS restic
+FROM ${RCLONE_IMAGE} AS rclone
+
+FROM ${PYTHON_IMAGE}
+
+WORKDIR /app
+
+ENV RESTIC_PASSWORD=""
+ENV RESTIC_PASSWORD_FILE=""
+ENV VAULTWARDEN_NAMESPACE=""
+ENV VAULTWARDEN_STATEFULSET=""
+ENV VW_DATA_DIR="/data"
+ENV RESTIC_REPOSITORY=""
+ENV RCLONE_CONFIG="/root/.config/rclone/rclone.conf"
+ENV HOST_TAG=""
+ENV BACKUP_TAG=""
+ENV SCALE_DOWN_TIMEOUT_SECONDS="5"
+ENV SCALE_DOWN_POLL_INTERVAL_SECONDS="5"
+
+COPY --from=restic /usr/bin/restic /usr/local/bin/restic
+COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
+
+COPY pyproject.toml /app/pyproject.toml
+COPY README.md /app/README.md
+COPY main.py /app/main.py
+
+RUN pip install --no-cache-dir .
+
+ENTRYPOINT ["python", "/app/main.py"]
