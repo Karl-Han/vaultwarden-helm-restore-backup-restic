@@ -1,0 +1,73 @@
+{{- if .Values.vaultwarden.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "vaultwarden_backup.vaultwardenName" . }}
+  namespace: {{ include "vaultwarden_backup.namespace" . }}
+  labels:
+    {{- include "vaultwarden_backup.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vaultwarden
+spec:
+  serviceName: {{ include "vaultwarden_backup.fullname" . }}
+  replicas: {{ .Values.vaultwarden.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "vaultwarden_backup.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: vaultwarden
+  template:
+    metadata:
+      labels:
+        {{- include "vaultwarden_backup.labels" . | nindent 8 }}
+        app.kubernetes.io/component: vaultwarden
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "vaultwarden_backup.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: vaultwarden
+          image: "{{ .Values.images.vaultwarden.repository }}:{{ .Values.images.vaultwarden.tag }}"
+          imagePullPolicy: {{ .Values.images.vaultwarden.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.vaultwarden.service.targetPort }}
+              protocol: TCP
+          env:
+            {{- range $name, $value := .Values.vaultwarden.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.vaultwarden.persistence.mountPath }}
+          resources:
+            {{- toYaml .Values.vaultwarden.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "vaultwarden_backup.pvcName" . }}
+{{- end }}

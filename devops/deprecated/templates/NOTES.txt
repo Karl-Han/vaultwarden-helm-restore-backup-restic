@@ -1,0 +1,28 @@
+Vaultwarden namespace: {{ include "vaultwarden_backup.namespace" . }}
+Backup CronJob: {{ include "vaultwarden_backup.backupCronJobName" . }}
+
+{{- if .Values.vaultwarden.ingress.enabled }}
+Ingress endpoints:
+{{- range $host := .Values.vaultwarden.ingress.hosts }}
+{{- range .paths }}
+  http{{ if $.Values.vaultwarden.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
+{{- end }}
+{{- end }}
+{{- else if contains "NodePort" .Values.vaultwarden.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ include "vaultwarden_backup.namespace" . }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "vaultwarden_backup.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ include "vaultwarden_backup.namespace" . }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.vaultwarden.service.type }}
+     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+           You can watch its status by running 'kubectl get --namespace {{ include "vaultwarden_backup.namespace" . }} svc -w {{ include "vaultwarden_backup.fullname" . }}'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ include "vaultwarden_backup.namespace" . }} {{ include "vaultwarden_backup.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ .Values.vaultwarden.service.port }}
+{{- else if contains "ClusterIP" .Values.vaultwarden.service.type }}
+  export POD_NAME=$(kubectl get pods --namespace {{ include "vaultwarden_backup.namespace" . }} -l "app.kubernetes.io/name={{ include "vaultwarden_backup.name" . }},app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=vaultwarden" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ include "vaultwarden_backup.namespace" . }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use Vaultwarden"
+  kubectl --namespace {{ include "vaultwarden_backup.namespace" . }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+{{- end }}
+
+The backup job scales the Vaultwarden StatefulSet down to 0 before running Restic,
+then restores it to {{ .Values.vaultwarden.replicaCount }} replica(s) after the backup.

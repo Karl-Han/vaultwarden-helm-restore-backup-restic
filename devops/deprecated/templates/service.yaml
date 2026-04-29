@@ -1,0 +1,20 @@
+{{- if .Values.vaultwarden.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vaultwarden_backup.fullname" . }}
+  namespace: {{ include "vaultwarden_backup.namespace" . }}
+  labels:
+    {{- include "vaultwarden_backup.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vaultwarden
+spec:
+  type: {{ .Values.vaultwarden.service.type }}
+  ports:
+    - port: {{ .Values.vaultwarden.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "vaultwarden_backup.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: vaultwarden
+{{- end }}
