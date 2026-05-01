@@ -1,0 +1,145 @@
+{{- if .Values.vaultwardenRestic.cronjob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "helm.backupCronJobName" . }}
+  labels:
+    {{- include "helm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backup
+spec:
+  schedule: {{ .Values.vaultwardenRestic.cronjob.schedule | quote }}
+  concurrencyPolicy: {{ .Values.vaultwardenRestic.cronjob.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.vaultwardenRestic.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.vaultwardenRestic.cronjob.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "helm.labels" . | nindent 12 }}
+            app.kubernetes.io/component: backup
+        spec:
+          serviceAccountName: {{ include "helm.backupServiceAccountName" . }}
+          restartPolicy: {{ .Values.vaultwardenRestic.cronjob.restartPolicy }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: backup-orchestrator
+              image: "{{ .Values.vaultwardenRestic.cronjob.image.repository }}:{{ .Values.vaultwardenRestic.cronjob.image.tag }}"
+              imagePullPolicy: {{ .Values.vaultwardenRestic.cronjob.image.pullPolicy }}
+              {{- with .Values.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              command:
+                - /bin/sh
+                - -ec
+              args:
+                - |
+                  set -eu
+
+                  namespace="{{ .Release.Namespace }}"
+                  statefulset="{{ include "helm.vaultwardenName" . }}"
+                  backup_deployment="{{ include "helm.resticBackupName" . }}"
+                  scale_timeout="{{ .Values.vaultwardenRestic.cronjob.scaleTimeoutSeconds }}"
+                  backup_timeout="{{ .Values.vaultwardenRestic.cronjob.backupCompletionTimeoutSeconds }}"
+                  poll_interval="{{ .Values.vaultwardenRestic.cronjob.pollIntervalSeconds }}"
+                  original_replicas="$(kubectl -n "${namespace}" get statefulset "${statefulset}" -o jsonpath='{.spec.replicas}')"
+
+                  wait_for_statefulset() {
+                    desired="$1"
+                    end=$(( $(date +%s) + scale_timeout ))
+                    while true; do
+                      current="$(kubectl -n "${namespace}" get statefulset "${statefulset}" -o jsonpath='{.status.replicas}')"
+                      ready="$(kubectl -n "${namespace}" get statefulset "${statefulset}" -o jsonpath='{.status.readyReplicas}')"
+                      spec="$(kubectl -n "${namespace}" get statefulset "${statefulset}" -o jsonpath='{.spec.replicas}')"
+                      current="${current:-0}"
+                      ready="${ready:-0}"
+                      spec="${spec:-0}"
+                      if [ "${spec}" = "${desired}" ] && [ "${current}" = "${desired}" ] && [ "${ready}" = "${desired}" ]; then
+                        return 0
+                      fi
+                      if [ "$(date +%s)" -ge "${end}" ]; then
+                        echo "Timed out waiting for StatefulSet ${statefulset} to reach ${desired} replicas" >&2
+                        return 1
+                      fi
+                      sleep "${poll_interval}"
+                    done
+                  }
+
+                  wait_for_statefulset_zero() {
+                    end=$(( $(date +%s) + scale_timeout ))
+                    while true; do
+                      current="$(kubectl -n "${namespace}" get statefulset "${statefulset}" -o jsonpath='{.status.replicas}')"
+                      ready="$(kubectl -n "${namespace}" get statefulset "${statefulset}" -o jsonpath='{.status.readyReplicas}')"
+                      spec="$(kubectl -n "${namespace}" get statefulset "${statefulset}" -o jsonpath='{.spec.replicas}')"
+                      current="${current:-0}"
+                      ready="${ready:-0}"
+                      spec="${spec:-0}"
+                      if [ "${spec}" = "0" ] && [ "${current}" = "0" ] && [ "${ready}" = "0" ]; then
+                        return 0
+                      fi
+                      if [ "$(date +%s)" -ge "${end}" ]; then
+                        echo "Timed out waiting for StatefulSet ${statefulset} to scale down to 0" >&2
+                        return 1
+                      fi
+                      sleep "${poll_interval}"
+                    done
+                  }
+
+                  wait_for_backup_deployment_zero() {
+                    end=$(( $(date +%s) + scale_timeout ))
+                    while true; do
+                      spec="$(kubectl -n "${namespace}" get deployment "${backup_deployment}" -o jsonpath='{.spec.replicas}')"
+                      current="$(kubectl -n "${namespace}" get deployment "${backup_deployment}" -o jsonpath='{.status.replicas}')"
+                      ready="$(kubectl -n "${namespace}" get deployment "${backup_deployment}" -o jsonpath='{.status.readyReplicas}')"
+                      spec="${spec:-0}"
+                      current="${current:-0}"
+                      ready="${ready:-0}"
+                      if [ "${spec}" = "0" ] && [ "${current}" = "0" ] && [ "${ready}" = "0" ]; then
+                        return 0
+                      fi
+                      if [ "$(date +%s)" -ge "${end}" ]; then
+                        echo "Timed out waiting for Deployment ${backup_deployment} to scale down to 0" >&2
+                        return 1
+                      fi
+                      sleep "${poll_interval}"
+                    done
+                  }
+
+                  cleanup() {
+                    kubectl -n "${namespace}" scale deployment "${backup_deployment}" --replicas=0 >/dev/null || true
+                    wait_for_backup_deployment_zero || true
+                    kubectl -n "${namespace}" scale statefulset "${statefulset}" --replicas="${original_replicas}" >/dev/null || true
+                    wait_for_statefulset "${original_replicas}" || true
+                  }
+
+                  trap 'status=$?; cleanup; exit ${status}' EXIT
+
+                  kubectl -n "${namespace}" scale deployment "${backup_deployment}" --replicas=0 >/dev/null
+                  wait_for_backup_deployment_zero
+                  kubectl -n "${namespace}" scale statefulset "${statefulset}" --replicas=0 >/dev/null
+                  wait_for_statefulset_zero
+                  kubectl -n "${namespace}" scale deployment "${backup_deployment}" --replicas=1 >/dev/null
+                  kubectl -n "${namespace}" rollout status deployment "${backup_deployment}" --timeout="${backup_timeout}s"
+              resources:
+                {{- toYaml .Values.vaultwardenRestic.cronjob.resources | nindent 16 }}
+{{- end }}

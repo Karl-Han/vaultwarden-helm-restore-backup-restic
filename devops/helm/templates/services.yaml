@@ -1,0 +1,37 @@
+{{- if .Values.vaultwarden.service.headless.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "helm.headlessServiceName" . }}
+  labels:
+    {{- include "helm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vaultwarden
+spec:
+  clusterIP: None
+  ports:
+    - port: {{ .Values.vaultwarden.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: vaultwarden
+  selector:
+    {{- include "helm.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: vaultwarden
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "helm.fullname" . }}
+  labels:
+    {{- include "helm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vaultwarden
+spec:
+  type: {{ .Values.vaultwarden.service.type }}
+  ports:
+    - port: {{ .Values.vaultwarden.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "helm.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: vaultwarden

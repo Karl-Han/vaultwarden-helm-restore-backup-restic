@@ -1,0 +1,22 @@
+{{- if and .Values.vaultwarden.persistence.create (not .Values.vaultwarden.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "helm.pvcName" . }}
+  labels:
+    {{- include "helm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storage
+  {{- if .Values.vaultwarden.persistence.keep }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.vaultwarden.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.vaultwarden.persistence.size }}
+  {{- with .Values.vaultwarden.persistence.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}

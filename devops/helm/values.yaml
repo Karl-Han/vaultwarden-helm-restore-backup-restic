@@ -1,0 +1,261 @@
+# Override the chart name portion used in generated resource names.
+nameOverride: ""
+
+# Override the full generated release name.
+fullnameOverride: ""
+
+# Optional image pull secrets for private registries.
+imagePullSecrets: []
+
+# Pod annotations shared by chart-managed workloads.
+podAnnotations: {}
+
+# Pod labels shared by chart-managed workloads.
+podLabels: {}
+
+# Pod-level security context applied to workloads.
+podSecurityContext: {}
+
+# Container-level security context applied to workloads.
+securityContext: {}
+
+# Node selector shared by chart-managed workloads.
+nodeSelector: {}
+
+# Tolerations shared by chart-managed workloads.
+tolerations: []
+
+# Affinity shared by chart-managed workloads.
+affinity: {}
+
+vaultwarden:
+  # StatefulSet settings derived from devops/k8s/sts_vaultwarden.yaml.
+  # Desired replica count for the main Vaultwarden StatefulSet.
+  replicaCount: 1
+  image:
+    # Vaultwarden application image repository.
+    repository: docker.io/vaultwarden/server
+    # Vaultwarden application image tag.
+    tag: latest
+    # Pull policy for the Vaultwarden image.
+    pullPolicy: IfNotPresent
+  service:
+    # User-facing service exposed to ingress.
+    type: ClusterIP
+    # Service port exposed inside the cluster.
+    port: 80
+    # Container port used by the Vaultwarden pod.
+    targetPort: 80
+    # Headless service used by the StatefulSet.
+    headless:
+      enabled: true
+  ingressClass:
+    # Create an IngressClass when true.
+    create: false
+    # Name referenced by the Vaultwarden ingress.
+    name: traefik
+    # Controller string expected by the ingress implementation.
+    controller: traefik.io/ingress-controller
+    # Optional annotations applied to the IngressClass resource.
+    annotations: {}
+  ingress:
+    # Enable the Vaultwarden ingress.
+    enabled: true
+    # Existing ingress class name to use for the Vaultwarden ingress.
+    className: traefik
+    # Ingress annotations, typically including cert-manager integration.
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-staging
+    # Host and path routing rules for Vaultwarden.
+    hosts:
+      - host: vaultwarden.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    # TLS settings for the Vaultwarden ingress.
+    tls:
+      - secretName: vaultwarden-tls
+        hosts:
+          - vaultwarden.example.com
+  persistence:
+    # Create a standalone PVC so the volume exists even when the StatefulSet is scaled to 0.
+    create: true
+    # Keep the PVC object when the Helm release is uninstalled.
+    # This does not control the underlying PV reclaim policy; that is defined by the StorageClass.
+    keep: true
+    # Use an existing PVC instead of creating one when set.
+    existingClaim: ""
+    # Base name for the generated PVC when create=true.
+    name: vaultwarden-data
+    # StorageClass used by the PVC.
+    storageClassName: openebs-lvmpv
+    # PVC access modes. The current design assumes ReadWriteOnce.
+    accessModes:
+      - ReadWriteOnce
+    # Requested PVC size.
+    size: 1Gi
+    # Mount path shared by Vaultwarden and the helper workloads.
+    mountPath: /data
+  inPodTls:
+    # Optional in-pod TLS mode for local prototyping with a manually created secret.
+    enabled: true
+    # Secret name that contains tls.crt and tls.key.
+    secretName: vaultwarden-tls
+    # Container mount path for the TLS secret volume.
+    mountPath: /ssl
+    # ROCKET_TLS value consumed by Vaultwarden when in-pod TLS is enabled.
+    rocketTlsValue: '{certs="/ssl/tls.crt",key="/ssl/tls.key"}'
+  env:
+    # Public Vaultwarden URL.
+    DOMAIN: "https://vaultwarden.example.com"
+    # Whether self-service signup is allowed.
+    SIGNUPS_ALLOWED: "false"
+    # Rocket HTTP port inside the container.
+    ROCKET_PORT: "80"
+  # Resource requests and limits for the Vaultwarden container.
+  resources: {}
+
+serviceAccount:
+  # Service account used by the Vaultwarden StatefulSet.
+  create: true
+  # Whether the Vaultwarden pod should mount the service account token.
+  automount: true
+  # Optional annotations for the Vaultwarden service account.
+  annotations: {}
+  # Explicit service account name. Leave empty to generate one.
+  name: ""
+
+backupServiceAccount:
+  # Service account used by the Vaultwarden Restic cronjob, backup deployment, and restore deployment.
+  create: true
+  # Whether backup and restore pods should mount the service account token.
+  automount: true
+  # Optional annotations for the backup service account.
+  annotations: {}
+  # Explicit backup service account name. Leave empty to generate one.
+  name: ""
+
+vaultwardenBackup:
+  # Restore helper deployment derived from devops/k8s/deploy-vw-backup.yaml.
+  enabled: true
+  # Keep this at 0 by default. Scale to 1 only when manual restore work is required.
+  replicaCount: 0
+  image:
+    # Helper image repository for ttionya/vaultwarden-backup.
+    repository: docker.io/ttionya/vaultwarden-backup
+    # Helper image tag.
+    tag: latest
+    # Pull policy for the helper image.
+    pullPolicy: IfNotPresent
+  # Container command used by the helper deployment.
+  command:
+    - sleep
+    - "1800"
+  # Mount path expected by the helper image for Vaultwarden data.
+  mountPath: /bitwarden/data
+  # Resource requests and limits for the helper container.
+  resources: {}
+
+vaultwardenRestic:
+  # Custom backup/restore image built from devops/Dockerfile.restic.
+  image:
+    # Repository for the custom Restic + rclone + Python image.
+    repository: docker.io/iwktd/vaultwarden-restic-backup
+    # Tag for the custom Restic image.
+    tag: latest
+    # Pull policy for the custom Restic image.
+    pullPolicy: IfNotPresent
+  env:
+    # Environment variables consumed by main.py and the container runtime.
+    # Inline Restic password value. Prefer secrets management in real deployments.
+    RESTIC_PASSWORD: ""
+    # Optional path inside the container to a file containing the Restic password.
+    RESTIC_PASSWORD_FILE: ""
+    # Restic repository URL, typically using the rclone backend.
+    RESTIC_REPOSITORY: "rclone:remote-webdav:restic-backup"
+    # Additional tag used to distinguish the backup source.
+    HOST_TAG: "k8s-vaultwarden"
+    # Primary tag applied to Vaultwarden backups.
+    BACKUP_TAG: "vaultwarden"
+    # Timeout used by the Python entrypoint when it is invoked manually.
+    SCALE_DOWN_TIMEOUT_SECONDS: "10"
+    # Poll interval while waiting for scaling operations to finish.
+    SCALE_DOWN_POLL_INTERVAL_SECONDS: "5"
+  backup:
+    # Restic backup deployment scaled by the CronJob controller.
+    # The actual backup runs in an init container with `python /app/main.py backup`.
+    enabled: true
+    # Keep this at 0. The CronJob scales it to 1 only while the backup is running.
+    replicaCount: 0
+    # Default arguments passed to `python /app/main.py`.
+    args:
+      - backup
+    # Optional paths to exclude from the backup. Each path is passed as `--exclude`.
+    excludePaths: []
+    # Resource requests and limits for the backup container.
+    resources: {}
+  restore:
+    # Restic restore deployment used only when restoration is required.
+    enabled: true
+    # Keep this at 0 by default. Scale to 1 only during restore work.
+    replicaCount: 0
+    # Optional command override for the restore container.
+    command: []
+    # Default arguments passed to python /app/main.py.
+    args:
+      - restore
+    # Restic snapshot selector restored by the helper deployment.
+    snapshot: latest
+    # Target path passed to `restic restore --target`.
+    restoreTarget: /
+    # Resource requests and limits for the restore container.
+    resources: {}
+  cronjob:
+    # Scheduled orchestration workload that scales Vaultwarden down, enables the backup deployment,
+    # waits for it to complete, then scales the application back up.
+    enabled: true
+    image:
+      # Image repository for the lightweight kubectl runner used by the CronJob.
+      repository: docker.io/bitnami/kubectl
+      # Image tag for the kubectl runner.
+      tag: latest
+      # Pull policy for the CronJob image.
+      pullPolicy: IfNotPresent
+    # Standard cron expression for backup scheduling.
+    # It is restic backup hourly.
+    schedule: "0 * * * *"
+    # Prevent overlapping backup runs.
+    concurrencyPolicy: Forbid
+    # Number of successful Jobs to keep.
+    successfulJobsHistoryLimit: 1
+    # Number of failed Jobs to keep.
+    failedJobsHistoryLimit: 3
+    # Pod restart policy for failed CronJob pods.
+    restartPolicy: OnFailure
+    # Maximum time to wait for the StatefulSet to scale down or back up.
+    scaleTimeoutSeconds: 300
+    # Maximum time to wait for the backup deployment to become Ready.
+    # The backup deployment becomes Ready only after the backup init container completes.
+    backupCompletionTimeoutSeconds: 7200
+    # Poll interval used by the shell orchestration loops.
+    pollIntervalSeconds: 5
+    # Resource requests and limits for the CronJob container.
+    resources: {}
+
+rclone:
+  # rclone configuration mounted for restic's rclone backend.
+  # This should match the location expected by the Python entrypoint and restic.
+  configPath: /root/.config/rclone/rclone.conf
+  secret:
+    # Create the Secret that stores rclone.conf content.
+    create: true
+    # Secret name mounted into backup and restore workloads.
+    name: rclone-config
+    # Full rclone.conf content, including the remote definition.
+    content: |
+      [remote-webdav]
+      type = webdav
+      url = https://webdav.example.com
+      vendor = other
+      user = username
+      pass = password

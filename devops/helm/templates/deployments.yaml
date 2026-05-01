@@ -1,0 +1,199 @@
+{{- if .Values.vaultwardenBackup.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "helm.vaultwardenBackupName" . }}
+  labels:
+    {{- include "helm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vaultwarden-backup
+spec:
+  replicas: {{ .Values.vaultwardenBackup.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "helm.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: vaultwarden-backup
+  template:
+    metadata:
+      labels:
+        {{- include "helm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: vaultwarden-backup
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: vaultwarden-backup
+          image: "{{ .Values.vaultwardenBackup.image.repository }}:{{ .Values.vaultwardenBackup.image.tag }}"
+          imagePullPolicy: {{ .Values.vaultwardenBackup.image.pullPolicy }}
+          {{- if .Values.vaultwardenBackup.command }}
+          command:
+            {{- toYaml .Values.vaultwardenBackup.command | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: vaultwarden-data
+              mountPath: {{ .Values.vaultwardenBackup.mountPath }}
+          resources:
+            {{- toYaml .Values.vaultwardenBackup.resources | nindent 12 }}
+      volumes:
+        - name: vaultwarden-data
+          persistentVolumeClaim:
+            claimName: {{ include "helm.pvcName" . }}
+{{- end }}
+---
+{{- if .Values.vaultwardenRestic.backup.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "helm.resticBackupName" . }}
+  labels:
+    {{- include "helm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: restic-backup
+spec:
+  replicas: {{ .Values.vaultwardenRestic.backup.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "helm.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: restic-backup
+  template:
+    metadata:
+      labels:
+        {{- include "helm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: restic-backup
+    spec:
+      serviceAccountName: {{ include "helm.backupServiceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: restic-backup
+          image: "{{ .Values.vaultwardenRestic.image.repository }}:{{ .Values.vaultwardenRestic.image.tag }}"
+          imagePullPolicy: {{ .Values.vaultwardenRestic.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command:
+            - python
+            - /app/main.py
+          args:
+            {{- range .Values.vaultwardenRestic.backup.args }}
+            - {{ . | quote }}
+            {{- end }}
+            {{- range .Values.vaultwardenRestic.backup.excludePaths }}
+            - --exclude
+            - {{ . | quote }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ include "helm.resticEnvSecretName" . }}
+          volumeMounts:
+            - name: vaultwarden-data
+              mountPath: {{ .Values.vaultwarden.persistence.mountPath }}
+            - name: rclone-config
+              mountPath: {{ dir .Values.rclone.configPath }}
+              readOnly: true
+          resources:
+            {{- toYaml .Values.vaultwardenRestic.backup.resources | nindent 12 }}
+      containers:
+        - name: backup-holder
+          image: "{{ .Values.vaultwardenRestic.image.repository }}:{{ .Values.vaultwardenRestic.image.tag }}"
+          imagePullPolicy: {{ .Values.vaultwardenRestic.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command:
+            - sleep
+            - infinity
+          volumeMounts:
+            - name: vaultwarden-data
+              mountPath: {{ .Values.vaultwarden.persistence.mountPath }}
+            - name: rclone-config
+              mountPath: {{ dir .Values.rclone.configPath }}
+              readOnly: true
+          resources:
+            {{- toYaml .Values.vaultwardenRestic.backup.resources | nindent 12 }}
+      volumes:
+        - name: vaultwarden-data
+          persistentVolumeClaim:
+            claimName: {{ include "helm.pvcName" . }}
+        - name: rclone-config
+          secret:
+            secretName: {{ .Values.rclone.secret.name }}
+{{- end }}
+---
+{{- if .Values.vaultwardenRestic.restore.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "helm.resticRestoreName" . }}
+  labels:
+    {{- include "helm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: restic-restore
+spec:
+  replicas: {{ .Values.vaultwardenRestic.restore.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "helm.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: restic-restore
+  template:
+    metadata:
+      labels:
+        {{- include "helm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: restic-restore
+    spec:
+      serviceAccountName: {{ include "helm.backupServiceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: restic-restore
+          image: "{{ .Values.vaultwardenRestic.image.repository }}:{{ .Values.vaultwardenRestic.image.tag }}"
+          imagePullPolicy: {{ .Values.vaultwardenRestic.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.vaultwardenRestic.restore.command }}
+          command:
+            {{- toYaml .Values.vaultwardenRestic.restore.command | nindent 12 }}
+          {{- end }}
+          {{- if .Values.vaultwardenRestic.restore.args }}
+          args:
+            {{- toYaml .Values.vaultwardenRestic.restore.args | nindent 12 }}
+          {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ include "helm.resticEnvSecretName" . }}
+          env:
+            - name: RESTIC_SNAPSHOT
+              value: {{ .Values.vaultwardenRestic.restore.snapshot | quote }}
+            - name: RESTIC_RESTORE_TARGET
+              value: {{ .Values.vaultwardenRestic.restore.restoreTarget | quote }}
+          volumeMounts:
+            - name: vaultwarden-data
+              mountPath: {{ .Values.vaultwarden.persistence.mountPath }}
+            - name: rclone-config
+              mountPath: {{ dir .Values.rclone.configPath }}
+              readOnly: true
+          resources:
+            {{- toYaml .Values.vaultwardenRestic.restore.resources | nindent 12 }}
+      volumes:
+        - name: vaultwarden-data
+          persistentVolumeClaim:
+            claimName: {{ include "helm.pvcName" . }}
+        - name: rclone-config
+          secret:
+            secretName: {{ .Values.rclone.secret.name }}
+{{- end }}

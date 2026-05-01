@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "helm.vaultwardenName" . }}
+  labels:
+    {{- include "helm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vaultwarden
+spec:
+  serviceName: {{ include "helm.headlessServiceName" . }}
+  replicas: {{ .Values.vaultwarden.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "helm.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: vaultwarden
+  template:
+    metadata:
+      labels:
+        {{- include "helm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: vaultwarden
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "helm.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: vaultwarden
+          image: "{{ .Values.vaultwarden.image.repository }}:{{ .Values.vaultwarden.image.tag }}"
+          imagePullPolicy: {{ .Values.vaultwarden.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.vaultwarden.service.targetPort }}
+              protocol: TCP
+          env:
+            {{- range $name, $value := .Values.vaultwarden.env }}
+            - name: {{ $name }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- if .Values.vaultwarden.inPodTls.enabled }}
+            - name: ROCKET_TLS
+              value: {{ .Values.vaultwarden.inPodTls.rocketTlsValue | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: vaultwarden-data
+              mountPath: {{ .Values.vaultwarden.persistence.mountPath }}
+            {{- if .Values.vaultwarden.inPodTls.enabled }}
+            - name: tls-secret-volume
+              mountPath: {{ .Values.vaultwarden.inPodTls.mountPath }}
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml .Values.vaultwarden.resources | nindent 12 }}
+      volumes:
+        - name: vaultwarden-data
+          persistentVolumeClaim:
+            claimName: {{ include "helm.pvcName" . }}
+        {{- if .Values.vaultwarden.inPodTls.enabled }}
+        - name: tls-secret-volume
+          secret:
+            secretName: {{ .Values.vaultwarden.inPodTls.secretName }}
+        {{- end }}
