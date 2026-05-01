@@ -14,31 +14,25 @@ spec:
   {{- with .Values.vaultwarden.ingress.className }}
   ingressClassName: {{ . }}
   {{- end }}
-  {{- if .Values.vaultwarden.ingress.tls }}
+  {{- if .Values.vaultwarden.ingress.tls.enabled }}
   tls:
-    {{- range .Values.vaultwarden.ingress.tls }}
     - hosts:
-        {{- range .hosts }}
+        {{- range .Values.vaultwarden.domains }}
         - {{ . | quote }}
         {{- end }}
-      secretName: {{ .secretName }}
-    {{- end }}
+      secretName: {{ .Values.vaultwarden.ingress.tls.secretName }}
   {{- end }}
   rules:
-    {{- range .Values.vaultwarden.ingress.hosts }}
-    - host: {{ .host | quote }}
+    {{- range .Values.vaultwarden.domains }}
+    - host: {{ . | quote }}
       http:
         paths:
-          {{- range .paths }}
-          - path: {{ .path }}
-            {{- with .pathType }}
-            pathType: {{ . }}
-            {{- end }}
+          - path: {{ $.Values.vaultwarden.ingress.path }}
+            pathType: {{ $.Values.vaultwarden.ingress.pathType }}
             backend:
               service:
                 name: {{ include "helm.fullname" $ }}
                 port:
                   number: {{ $.Values.vaultwarden.service.port }}
-          {{- end }}
     {{- end }}
 {{- end }}

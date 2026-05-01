@@ -7,10 +7,8 @@ Restic restore Deployment: {{ include "helm.resticRestoreName" . }} (defaults to
 
 {{- if .Values.vaultwarden.ingress.enabled }}
 Ingress endpoints:
-{{- range $host := .Values.vaultwarden.ingress.hosts }}
-{{- range .paths }}
-  http{{ if $.Values.vaultwarden.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
-{{- end }}
+{{- range $domain := .Values.vaultwarden.domains }}
+  http{{ if $.Values.vaultwarden.ingress.tls.enabled }}s{{ end }}://{{ $domain }}{{ $.Values.vaultwarden.ingress.path }}
 {{- end }}
 {{- else if contains "NodePort" .Values.vaultwarden.service.type }}
   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "helm.fullname" . }})

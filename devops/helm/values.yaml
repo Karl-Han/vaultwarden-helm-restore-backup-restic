@@ -32,6 +32,10 @@ vaultwarden:
   # StatefulSet settings derived from devops/k8s/sts_vaultwarden.yaml.
   # Desired replica count for the main Vaultwarden StatefulSet.
   replicaCount: 1
+  # Public DNS names routed to the same Vaultwarden service.
+  # The first entry is used as the canonical DOMAIN value inside Vaultwarden.
+  domains:
+    - vaultwarden.example.com
   image:
     # Vaultwarden application image repository.
     repository: docker.io/vaultwarden/server
@@ -66,17 +70,15 @@ vaultwarden:
     # Ingress annotations, typically including cert-manager integration.
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt-staging
-    # Host and path routing rules for Vaultwarden.
-    hosts:
-      - host: vaultwarden.example.com
-        paths:
-          - path: /
-            pathType: Prefix
-    # TLS settings for the Vaultwarden ingress.
+    # HTTP path exposed for each domain in vaultwarden.domains.
+    path: /
+    # PathType used for the Vaultwarden ingress path.
+    pathType: Prefix
     tls:
-      - secretName: vaultwarden-tls
-        hosts:
-          - vaultwarden.example.com
+      # Enable TLS for all domains in vaultwarden.domains.
+      enabled: true
+      # Secret used by Traefik and cert-manager for the multi-domain certificate.
+      secretName: vaultwarden-tls
   persistence:
     # Create a standalone PVC so the volume exists even when the StatefulSet is scaled to 0.
     create: true
@@ -106,8 +108,6 @@ vaultwarden:
     # ROCKET_TLS value consumed by Vaultwarden when in-pod TLS is enabled.
     rocketTlsValue: '{certs="/ssl/tls.crt",key="/ssl/tls.key"}'
   env:
-    # Public Vaultwarden URL.
-    DOMAIN: "https://vaultwarden.example.com"
     # Whether self-service signup is allowed.
     SIGNUPS_ALLOWED: "false"
     # Rocket HTTP port inside the container.

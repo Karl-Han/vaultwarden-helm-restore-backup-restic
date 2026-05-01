@@ -59,6 +59,8 @@ spec:
               containerPort: {{ .Values.vaultwarden.service.targetPort }}
               protocol: TCP
           env:
+            - name: DOMAIN
+              value: {{ printf "https://%s" (first .Values.vaultwarden.domains) | quote }}
             {{- range $name, $value := .Values.vaultwarden.env }}
             - name: {{ $name }}
               value: {{ $value | quote }}
