@@ -1,4 +1,4 @@
-# vaultwarden_backup
+# Helm Chart for Vaultwarden Restic Backup and Restore
 
 Vaultwarden backup automation with two parallel tracks:
 
@@ -37,6 +37,24 @@ The goal of the Helm phase is to make the prototype reproducible and configurabl
 - WebDAV and Restic settings
 - service accounts and RBAC
 
+The current Helm implementation under [devops/helm](/home/iwktd/k8s_deployments/vaultwarden_backup/devops/helm) contains these components:
+
+- `PersistentVolumeClaim`: keeps the Vaultwarden data volume available even when the `StatefulSet` is scaled to `0`
+- `StatefulSet`: runs the main Vaultwarden application
+- headless `Service`: provides the governing service for the `StatefulSet`
+- application `Service`: exposes Vaultwarden to ingress
+- `IngressClass`: optionally declares the Traefik ingress class
+- `Ingress`: routes external traffic and carries cert-manager annotations
+- Vaultwarden `ServiceAccount`: identity for the main application pod
+- backup `ServiceAccount`: identity for backup and restore workloads
+- `Role` and `RoleBinding`: allow the backup runtime to scale the Vaultwarden `StatefulSet` and the Restic backup deployment
+- vaultwarden-backup `Deployment`: optional `ttionya/vaultwarden-backup` restore helper, scaled to `0` by default
+- Restic backup `Deployment`: scheduled helper that mounts the PVC and runs `python /app/main.py backup` in an init container, scaled to `0` except while the CronJob is running
+- Restic restore `Deployment`: optional restore helper based on `devops/Dockerfile.restic`, scaled to `0` by default
+- backup `CronJob`: orchestration runner that scales Vaultwarden down, scales the Restic backup deployment up, waits for the backup init container to finish, then restores the steady state
+- rclone `Secret`: provides `rclone.conf` for the Restic `rclone:` backend
+- Restic env `Secret`: provides the runtime environment variables consumed by `main.py`
+
 ## Repository Layout
 
 - [main.py](/home/iwktd/k8s_deployments/vaultwarden_backup/main.py): Python backup entrypoint
@@ -49,7 +67,7 @@ The goal of the Helm phase is to make the prototype reproducible and configurabl
 
 ## Backup Behavior
 
-The Python entrypoint performs this flow:
+The Python entrypoint performs this flow when it is used directly:
 
 1. Load Kubernetes configuration using the Python Kubernetes client.
 2. Check that the Vaultwarden data directory exists.

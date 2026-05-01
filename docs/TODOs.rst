@@ -53,8 +53,9 @@ Implementation plan
 5. Convert the backup workflow into Kubernetes workload templates.
 
    - CronJob
+   - Restic backup deployment
    - service account
-   - RBAC for StatefulSet scaling
+   - RBAC for StatefulSet and deployment scaling
    - environment variable injection
    - secret resources for the required environment variables
    - secret mounts or env wiring for Restic password and rclone config
@@ -84,7 +85,7 @@ Implementation plan
 
 9. Add values for restore-oriented helper deployments.
 
-   - backup-helper deployment replica count
+   - vaultwarden-backup deployment replica count
    - Restic restore deployment replica count
    - image references
    - commands and environment variables
@@ -103,6 +104,6 @@ The Helm implementation should be considered ready when:
 - it is generated from the ``devops/k8s`` prototype behavior
 - it supports fresh install and restore-oriented initialization
 - it includes two restore-oriented deployments that default to ``0`` replicas
-- it supports scheduled backups with the Python entrypoint
+- it supports scheduled backups through a CronJob plus a Restic backup deployment
 - it documents local prototype mode versus real deployment mode
 - it renders cleanly with ``helm lint`` and ``helm template``

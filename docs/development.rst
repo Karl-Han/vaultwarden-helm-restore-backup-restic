@@ -65,7 +65,19 @@ Local prototype workflow
 
       kubectl apply -n vw-test -f devops/k8s/deploy-vw-backup.yaml
 
-   Then attach a shell to the pod and follow the restore process from:
+   Then make sure the restore zip file is available as ``backup.YYYYMMDD.zip`` in a local folder that is mounted to ``/bitwarden/restore`` inside the helper container.
+
+   This is required because ``/app/entrypoint.sh restore`` only searches ``/bitwarden/restore``.
+
+   Example restore command inside the pod:
+
+   .. code-block:: bash
+
+      /app/entrypoint.sh restore --zip-file backup.20260501.zip -p
+
+   The restore process will overwrite the existing data already mounted from the Vaultwarden PVC.
+
+   Follow the helper image restore workflow from:
 
    - https://github.com/ttionya/vaultwarden-backup
 

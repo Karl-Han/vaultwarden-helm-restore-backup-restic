@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vaultwarden-backup"
+name = "vaultwarden-helm-with-restic-backup"
 version = "0.1.0"
-description = "Vaultwarden backup helper that scales down a StatefulSet and runs restic."
+description = "Helm Chart for Vaultwarden with restic backup, restore and vaultwarden-backup restore"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
