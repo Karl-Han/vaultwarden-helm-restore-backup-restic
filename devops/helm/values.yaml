@@ -36,7 +36,7 @@ vaultwarden:
     # Vaultwarden application image repository.
     repository: docker.io/vaultwarden/server
     # Vaultwarden application image tag.
-    tag: latest
+    tag: 1.35.8
     # Pull policy for the Vaultwarden image.
     pullPolicy: IfNotPresent
   service:
@@ -144,7 +144,7 @@ vaultwardenBackup:
     # Helper image repository for ttionya/vaultwarden-backup.
     repository: docker.io/ttionya/vaultwarden-backup
     # Helper image tag.
-    tag: latest
+    tag: 1.26.7
     # Pull policy for the helper image.
     pullPolicy: IfNotPresent
   # Container command used by the helper deployment.
