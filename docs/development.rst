@@ -36,6 +36,11 @@ Local prototype workflow
 
    .. code-block:: bash
 
+      # openssl req -x509 -nodes -days 365 \
+      #   -newkey rsa:2048 \
+      #   -keyout key.pem \
+      #   -out cert.pem \
+      #   -subj "/CN=example.com/O=example"
       kubectl create -n vw-test secret tls vaultwarden-tls \
         --cert=cert.pem \
         --key=key.pem

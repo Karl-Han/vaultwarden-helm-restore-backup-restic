@@ -1,6 +1,5 @@
 .codex
 .envrc
-data/backup*
 # Python-generated files
 __pycache__/
 *.py[oc]
