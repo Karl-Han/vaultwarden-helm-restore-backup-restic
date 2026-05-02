@@ -32,6 +32,8 @@ When changing Helm templates, always run both `helm lint` and `helm template`.
 
 Use 4-space indentation in Python and keep code compatible with Python 3.12. Prefer small functions, explicit error handling, and `click` for CLI behavior. In Helm templates and YAML, keep keys descriptive and add comments in `devops/helm/values.yaml` unless the meaning is obvious.
 
+In repository documentation, use relative file references such as `./devops/helm/README.md` instead of absolute filesystem paths.
+
 Naming patterns in recent commits use scoped prefixes, for example:
 
 - `[docs][env] init docs`

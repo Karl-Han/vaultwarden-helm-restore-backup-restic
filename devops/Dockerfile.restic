@@ -1,3 +1,10 @@
+# $ podman build \
+#   -f devops/Dockerfile.restic \
+#   --build-arg RESTIC_IMAGE=docker.io/restic/restic:latest \
+#   --build-arg RCLONE_IMAGE=docker.io/rclone/rclone:latest \
+#   -t docker.io/iwktd/vaultwarden-restic-backup:latest \
+#   .
+
 ARG RESTIC_IMAGE=docker.io/restic/restic:latest
 ARG RCLONE_IMAGE=docker.io/rclone/rclone:latest
 ARG PYTHON_IMAGE=python:3.12-slim

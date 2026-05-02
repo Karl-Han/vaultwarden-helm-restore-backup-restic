@@ -1,157 +1,92 @@
-# Helm Chart for Vaultwarden Restic Backup and Restore
+# Vaultwarden Backup, Restore, and Archive Project
 
-Vaultwarden backup automation with two parallel tracks:
+This repository combines Kubernetes deployment assets, a custom Restic helper image, and Terraform for object storage so that Vaultwarden can be run, backed up, restored, and archived with a repeatable workflow.
 
-- prototyping with raw Kubernetes manifests and a custom Restic image
-- implementation and packaging with Helm
+The project is organized around three main parts:
 
-## Development Phases
+## 1. Helm chart for Vaultwarden, backup, restore, and archive workflows
 
-Development is split into two steps.
+The Helm chart in `devops/helm` is the main deployment package.
 
-### 1. Prototyping
+Its purpose is not only to run Vaultwarden itself, but also to provide the supporting workloads needed for operational data management:
 
-The prototype phase is built from:
+- a Vaultwarden `StatefulSet` with persistent storage
+- a `vaultwarden-backup` helper `Deployment` based on the `ttionya/vaultwarden-backup` project for manual restore from a zip backup
+- a `vaultwarden-restic-backup` `Deployment` that mounts the Vaultwarden data volume and runs the Python Restic workflow to back up the Vaultwarden data directory to a remote Restic repository
+- a `vaultwarden-restic-restore` `Deployment` for manual restore from the remote Restic repository back into the Vaultwarden data volume
+- a backup `CronJob` that automates recurring backup of the Vaultwarden data directory to the remote Restic folder
+- an archive `CronJob` that copies the remote Restic folder and uploads a compressed archive of it to AWS S3
 
-- [devops/k8s/deploy-vw-backup.yaml](/home/iwktd/k8s_deployments/vaultwarden_backup/devops/k8s/deploy-vw-backup.yaml)
-- [devops/k8s/sts_vaultwarden.yaml](/home/iwktd/k8s_deployments/vaultwarden_backup/devops/k8s/sts_vaultwarden.yaml)
-- [devops/Dockerfile.restic](/home/iwktd/k8s_deployments/vaultwarden_backup/devops/Dockerfile.restic)
+Operationally, this means the chart covers five different concerns:
 
-This phase is used to validate the operational flow first:
+- normal Vaultwarden runtime
+- manual restore from a zip backup using `vaultwarden-backup`
+- scheduled backup of `/data` to a remote Restic repository
+- manual restore from the remote Restic repository
+- scheduled archive of the remote Restic repository into S3 for another layer of retention
 
-- Vaultwarden runs from a `StatefulSet`
-- the PVC is mounted at `/data`
-- a custom image contains Python, Restic, and rclone
-- the backup process scales the `StatefulSet` down, runs Restic, then scales it back up
+The chart also creates the supporting services, ingress, service accounts, RBAC, PVC, and secrets required to make those primary workflows work together.
 
-### 2. Helm Implementation
+More detail is in [`devops/helm/README.md`](./devops/helm/README.md).
 
-The Helm phase packages the same behavior into chart-managed resources under `devops/helm`.
+## 2. Terraform for S3 primary and replica storage
 
-The goal of the Helm phase is to make the prototype reproducible and configurable:
+The Terraform code in `terraform/` sets up the object storage used by the archive workflow.
 
-- namespace
-- Vaultwarden image and ingress
-- PVC settings
-- backup schedule
-- WebDAV and Restic settings
-- service accounts and RBAC
+Its purpose is to create:
 
-The current Helm implementation under [devops/helm](/home/iwktd/k8s_deployments/vaultwarden_backup/devops/helm) contains these components:
+- a primary S3 bucket
+- a replication bucket in another region
+- the IAM role and policy required for S3 replication
+- an IAM user access key and secret access key for the archive workflow that uploads the remote Restic archive into S3
 
-- `PersistentVolumeClaim`: keeps the Vaultwarden data volume available even when the `StatefulSet` is scaled to `0`
-- `StatefulSet`: runs the main Vaultwarden application
-- headless `Service`: provides the governing service for the `StatefulSet`
-- application `Service`: exposes Vaultwarden to ingress
-- `IngressClass`: optionally declares the Traefik ingress class
-- `Ingress`: routes external traffic and carries cert-manager annotations
-- Vaultwarden `ServiceAccount`: identity for the main application pod
-- backup `ServiceAccount`: identity for backup and restore workloads
-- `Role` and `RoleBinding`: allow the backup runtime to scale the Vaultwarden `StatefulSet` and the Restic backup deployment
-- vaultwarden-backup `Deployment`: optional `ttionya/vaultwarden-backup` restore helper, scaled to `0` by default
-- Restic backup `Deployment`: scheduled helper that mounts the PVC and runs `python /app/main.py backup` in an init container, scaled to `0` except while the CronJob is running
-- Restic restore `Deployment`: optional restore helper based on `devops/Dockerfile.restic`, scaled to `0` by default
-- backup `CronJob`: orchestration runner that scales Vaultwarden down, scales the Restic backup deployment up, waits for the backup init container to finish, then restores the steady state
-- archive `CronJob`: optional daily archive runner that copies a configured remote folder into a temporary `/data` workspace, creates a plain `tar.gz`, and uploads it to every target listed in `TARGETS` under `TARGET_PATH_PREFIX/YYYYMMDD.tar.gz`
-- rclone `Secret`: provides `rclone.conf` for the Restic `rclone:` backend
-- Restic env `Secret`: provides the runtime environment variables consumed by `main.py`
-- archive env `Secret`: provides `SOURCE_REMOTE_PATH`, `TARGETS`, and `TARGET_PATH_PREFIX` for the archive job
+This Terraform layer supports the Helm archive `CronJob` by providing the AWS destination and credentials needed for long-term archive storage of the remote Restic folder.
 
-## Repository Layout
+More detail is in [`terraform/README.md`](./terraform/README.md).
 
-- [main.py](/home/iwktd/k8s_deployments/vaultwarden_backup/main.py): Python backup entrypoint
-- [pyproject.toml](/home/iwktd/k8s_deployments/vaultwarden_backup/pyproject.toml): Python dependencies
-- [envrc.template](/home/iwktd/k8s_deployments/vaultwarden_backup/envrc.template): expected runtime environment variables
-- [devops/Dockerfile.restic](/home/iwktd/k8s_deployments/vaultwarden_backup/devops/Dockerfile.restic): custom backup image
-- [devops/k8s](/home/iwktd/k8s_deployments/vaultwarden_backup/devops/k8s): prototype Kubernetes manifests
-- [devops/helm](/home/iwktd/k8s_deployments/vaultwarden_backup/devops/helm): Helm implementation area
-- [scripts/validate.sh](/home/iwktd/k8s_deployments/vaultwarden_backup/scripts/validate.sh): validation helper
+## 3. Python Restic workflow and custom image
 
-## Backup Behavior
+The Python CLI in [`main.py`](./main.py), together with [`pyproject.toml`](./pyproject.toml) and [`devops/Dockerfile.restic`](./devops/Dockerfile.restic), builds the custom image used by the Restic backup and restore workloads.
 
-The Python entrypoint performs this flow when it is used directly:
+This part of the project is responsible for:
 
-1. Load Kubernetes configuration using the Python Kubernetes client.
-2. Check that the Vaultwarden data directory exists.
-3. Check that the rclone config file exists.
-   Default path: `~/.config/rclone/rclone.conf`
-4. Check that the Restic password is available through `RESTIC_PASSWORD`, `RESTIC_PASSWORD_FILE`, or `--password-file`.
-5. Scale the target `StatefulSet` down to `0`.
-6. Run:
+- scaling the Vaultwarden `StatefulSet` down before backup or restore
+- validating the configured Vaultwarden data directory, rclone configuration path, and Restic password configuration
+- running `restic backup` from the Vaultwarden data directory to the remote Restic repository
+- running retention cleanup with `restic forget --prune`
+- running `restic restore` from the remote Restic repository back into the mounted Vaultwarden data path
+- scaling the Vaultwarden `StatefulSet` back up after the operation
 
-```bash
-restic backup "$VW_DATA_DIR" \
-  --tag vaultwarden \
-  --tag "$HOST_TAG" \
-  --exclude-file "$TMP_EXCLUDES"
-```
+This image is used by:
 
-7. Run:
+- the automated Restic backup path in Kubernetes
+- the manual Restic restore path in Kubernetes
+- local or ad hoc operator-driven backup and restore runs outside Kubernetes, if the required environment is provided
 
-```bash
-restic forget \
-  --tag vaultwarden \
-  --keep-last 24 \
-  --keep-daily 30 \
-  --keep-weekly 8 \
-  --keep-monthly 12 \
-  --prune
-```
+## How the parts fit together
 
-8. Scale the `StatefulSet` back to its original replica count.
+At a high level, the intended workflow is:
 
-## Runtime Environment
+1. Use Terraform to provision the S3 buckets, replication configuration, and AWS credentials for the archive flow.
+2. Build and publish the custom Restic image from `devops/Dockerfile.restic`. Command is included in the Dockerfile
+3. Install the Helm chart with the required Vaultwarden, Restic, rclone, ingress, and secret configuration.
+4. Let Vaultwarden run normally from the persistent volume.
+5. Use the Restic backup `CronJob` to periodically back up the Vaultwarden data directory to the remote Restic repository.
+6. Optionally use the second `CronJob` to back up the remote Restic repository itself to S3.
+7. When restore is needed, use either:
+   - the `vaultwarden-backup` helper for zip-based restore, or
+   - the `vaultwarden-restic-restore` helper for remote Restic restore.
 
-The container and local workflow expect the variables defined in [envrc.template](/home/iwktd/k8s_deployments/vaultwarden_backup/envrc.template).
+## Repository map
 
-Important variables:
-
-- `VAULTWARDEN_NAMESPACE`
-- `VAULTWARDEN_STATEFULSET`
-- `VW_DATA_DIR`
-- `RESTIC_REPOSITORY`
-- `RCLONE_CONFIG`
-- `RESTIC_PASSWORD` or `RESTIC_PASSWORD_FILE`
-- `HOST_TAG`
-- `BACKUP_TAG`
-
-## Actual Deployment Flow
-
-In actual deployment, the steps are:
-
-1. Install the Helm chart together with the required configuration for Restic, rclone, WebDAV, secrets, and the backup job.
-2. Optionally scale the Vaultwarden `StatefulSet` down and restore an existing database and data set into `/data`.
-3. Scale the `StatefulSet` back up.
-
-That means the initial restore path is manual and separate from the recurring backup flow.
-
-## Initialization And Maintenance
-
-For initialization or maintenance work, the desired pattern is:
-
-1. Create the PVC and related resources.
-2. Create the Vaultwarden `StatefulSet` with replica count set to `0` so the volume exists and is ready.
-3. Manually restore or copy the existing Vaultwarden data into `/data`.
-4. Scale the Vaultwarden `StatefulSet` to `1` when the data is ready.
-
-This keeps restoration separate from the scheduled backup process.
-
-## Image Notes
-
-The backup image must contain:
-
-- Python 3.12
-- the Python dependencies from [pyproject.toml](/home/iwktd/k8s_deployments/vaultwarden_backup/pyproject.toml)
-- `restic`
-- `rclone`
-
-The container entrypoint should run:
-
-```bash
-python /app/main.py
-```
-
-so runtime flags can still be passed to the Python CLI.
+- `devops/helm/`: Helm chart for the full Kubernetes workflow
+- `devops/k8s/`: earlier prototype manifests used before the chart packaging
+- `devops/Dockerfile.restic`: custom image with Python, Restic, and rclone
+- `main.py`: Python CLI for Restic backup and restore orchestration
+- `pyproject.toml`: Python package metadata and dependencies
+- `terraform/`: S3 and IAM provisioning for archive storage
+- `docs/`: development notes and operational documentation
+- `envrc.template`: example runtime environment variables
 
 ## References
 

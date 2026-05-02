@@ -1,129 +1,141 @@
-# devops/helm
+# Helm Chart Overview
 
-This chart is the Helm packaging of the Vaultwarden backup prototype defined under `devops/k8s` and `devops/Dockerfile.restic`.
+This chart packages the Kubernetes deployment model for running Vaultwarden together with the backup, restore, and archive workflows used by this repository.
 
-## Component Overview
+The chart should be understood in terms of the main operational workflows it provides, not as a list of raw Kubernetes objects.
 
-The chart contains these main components:
+## 1. Run Vaultwarden with persistent storage
 
-- `PersistentVolumeClaim`
-  Purpose: provide the shared `ReadWriteOnce` volume mounted at `/data` by Vaultwarden and the backup or restore workloads.
+The first purpose of the chart is to run the main Vaultwarden service on a persistent volume.
 
-- `StatefulSet`
-  Purpose: run the main Vaultwarden application with persistent storage.
+To make that work, the chart provides:
 
-- headless `Service`
-  Purpose: act as the governing service for the Vaultwarden `StatefulSet`.
+- a persistent data volume mounted at the Vaultwarden data path
+- the main Vaultwarden workload
+- internal service exposure for the application
+- optional ingress and TLS configuration for external access
+- the service account and related wiring required by the application pod
 
-- application `Service`
-  Purpose: expose Vaultwarden inside the cluster for ingress routing.
+This is the steady-state workload. In normal operation, Vaultwarden runs continuously from the PVC and serves traffic through the configured service and ingress path.
 
-- `IngressClass`
-  Purpose: optionally define the Traefik ingress class when the cluster does not already provide it.
+## 2. Restore from a Vaultwarden zip backup
 
-- `Ingress`
-  Purpose: expose Vaultwarden externally and carry cert-manager annotations for TLS issuance.
+The chart includes a `vaultwarden-backup` helper deployment based on the `ttionya/vaultwarden-backup` project.
 
-- Vaultwarden `ServiceAccount`
-  Purpose: identity for the main Vaultwarden application pod.
+Its purpose in this chart is manual restore from a zip backup into the shared Vaultwarden data volume. The deployment stays scaled to `0` by default and is only scaled up when an operator needs it.
 
-- backup `ServiceAccount`
-  Purpose: identity for backup and restore workloads that need Kubernetes API access.
+To support that purpose, the chart also provides the shared volume mount and the surrounding configuration required for the helper pod to work against the same persistent data as the main Vaultwarden workload.
 
-- `Role` and `RoleBinding`
-  Purpose: allow the CronJob and Restic helper workloads to scale the Vaultwarden `StatefulSet` and the Restic backup deployment.
+Although the upstream helper project also supports backup functions, this chart currently treats it primarily as a restore helper because that is the tested operational path here.
 
-- vaultwarden-backup `Deployment`
-  Purpose: manual restore helper derived from `devops/k8s/deploy-vw-backup.yaml`, using `docker.io/ttionya/vaultwarden-backup`.
-  Default behavior: `0` replicas. Scale to `1` only when restore work is needed.
+## 3. Back up the Vaultwarden data directory to a remote Restic repository
 
-- Restic backup `Deployment`
-  Purpose: helper workload that mounts the PVC and runs `python /app/main.py backup` in an init container.
-  Default behavior: `0` replicas. The CronJob scales it to `1` only while a backup is running.
+The chart includes a custom Restic backup path built around the image from `devops/Dockerfile.restic` and the Python CLI in `main.py`.
 
-- Restic restore `Deployment`
-  Purpose: manual restore helper based on the custom Restic image from `devops/Dockerfile.restic`.
-  Default behavior: `0` replicas. Scale to `1` only when restore work is needed.
+Its purpose is to perform recurring backups of the Vaultwarden data directory to a remote Restic repository through rclone.
 
-- backup `CronJob`
-  Purpose: scheduled control-plane runner that scales Vaultwarden down, scales the Restic backup deployment up, waits for the init-container backup to finish, then scales everything back to the steady state.
+The workflow is:
 
-- archive `CronJob`
-  Purpose: scheduled archive runner that copies a remote folder into a temporary local `/data` workspace, creates a plain `tar.gz`, and uploads it to every rclone target listed in `TARGETS` under `TARGET_PATH_PREFIX/YYYYMMDD.tar.gz`.
+1. the scheduled backup controller starts
+2. Vaultwarden is scaled down to protect the data during backup
+3. the Restic backup helper is scaled up
+4. the helper runs `python /app/main.py backup`
+5. the helper performs `restic backup` and `restic forget --prune`
+6. the helper finishes
+7. Vaultwarden is scaled back to its original replica count
 
-- rclone config `Secret`
-  Purpose: provide `rclone.conf` for Restic's `rclone:` backend.
+To make that workflow work safely, the chart also creates:
 
-- Restic env `Secret`
-  Purpose: provide the runtime environment variables consumed by `main.py`, including repository settings and scale timing values.
+- the dedicated helper deployment that mounts the same Vaultwarden PVC
+- the scheduled orchestrator job that coordinates scaling
+- the service account and RBAC permissions needed to scale workloads through the Kubernetes API
+- the secret data needed for Restic repository access and rclone configuration
 
-## Template Map
+The backup helper deployment stays at `0` replicas during steady state. The scheduled controller scales it up only for the duration of the backup run.
 
-- `templates/statefulset.yaml`
-  Purpose: Vaultwarden StatefulSet.
+## 4. Restore from the remote Restic repository
 
-- `templates/services.yaml`
-  Purpose: headless service and application service.
+The chart also includes a manual Restic restore deployment that uses the same custom image and shared PVC.
 
-- `templates/ingressclass.yaml`
-  Purpose: optional ingress class definition.
+Its purpose is operator-driven restore from the remote Restic repository back into the Vaultwarden data directory.
 
-- `templates/ingress.yaml`
-  Purpose: external ingress and TLS routing.
+The restore workflow is:
 
-- `templates/persistentvolumeclaim.yaml`
-  Purpose: standalone PVC creation.
+1. scale the main Vaultwarden workload down
+2. scale the Restic restore helper up
+3. run `python /app/main.py restore`
+4. restore the selected snapshot into the mounted filesystem layout
+5. scale the helper back down
+6. scale Vaultwarden back up
 
-- `templates/serviceaccount.yaml`
-  Purpose: Vaultwarden service account.
+Like the zip restore helper, this deployment stays at `0` replicas by default and is only used when restore work is needed.
 
-- `templates/backup-serviceaccount.yaml`
-  Purpose: backup and restore service account.
+## 5. Archive the remote Restic repository into AWS S3
 
-- `templates/rbac.yaml`
-  Purpose: permissions for scaling the StatefulSet and the Restic backup deployment.
+The chart includes a second scheduled workflow whose purpose is different from the Vaultwarden data backup flow.
 
-- `templates/deployments.yaml`
-  Purpose: the `vaultwarden-backup` helper deployment, the Restic backup deployment, and the Restic restore deployment.
+Instead of backing up the live Vaultwarden PVC directly, this workflow backs up the remote Restic repository itself into AWS S3.
 
-- `templates/cronjob.yaml`
-  Purpose: scheduled backup orchestration job and scheduled archive job.
+The workflow is:
 
-- `templates/secrets.yaml`
-  Purpose: rclone config secret, Restic environment secret, and archive environment secret.
+1. connect to the remote path that stores the Restic repository
+2. copy that remote content into a temporary local working directory
+3. package the copied content as a `tar.gz`
+4. upload the archive to one or more configured rclone targets, such as an S3 bucket
 
-- `templates/NOTES.txt`
-  Purpose: post-install notes for operators.
+This creates another layer of retention on top of the remote Restic repository and is the place where the Terraform-managed S3 buckets and credentials are used.
 
-## Important Values
+To make that work, the chart also provides:
 
-The main value groups are:
+- the archive `CronJob`
+- the archive environment secret
+- access to the shared rclone configuration secret
+- the temporary in-pod workspace needed to assemble the archive before upload
+
+## Supporting configuration
+
+Several pieces exist only to support the main workflows above:
+
+- shared storage configuration for the Vaultwarden data volume
+- ingress and TLS settings for the live application
+- service accounts and RBAC rules for workloads that need Kubernetes API access
+- the rclone configuration secret
+- Restic environment variables and timing configuration
+- archive source, target, and path-prefix settings
+
+These are supporting pieces, not the primary story of the chart.
+
+## Main values to understand first
+
+If you are configuring the chart, start with these value groups:
 
 - `vaultwarden`
-  Purpose: StatefulSet, service, ingress, TLS, and PVC settings for the main application.
+  Purpose: live application settings, storage, service, ingress, and TLS behavior.
 
 - `vaultwardenBackup`
-  Purpose: settings for the `ttionya/vaultwarden-backup` helper deployment.
+  Purpose: manual zip-based restore helper using `ttionya/vaultwarden-backup`.
 
 - `vaultwardenRestic`
-  Purpose: settings for the custom Restic image, backup deployment, restore deployment, cronjob schedule, and runtime environment.
+  Purpose: custom Restic image settings, automated backup behavior, manual Restic restore behavior, and scheduled orchestration.
 
 - `vaultwardenArchive`
-  Purpose: settings for the daily archive CronJob, including the source remote path, comma-separated upload targets, and the shared destination path prefix.
+  Purpose: scheduled archive of the remote Restic repository into rclone targets such as S3.
 
 - `rclone`
-  Purpose: location and content of `rclone.conf`.
+  Purpose: rclone configuration content and mount location used by Restic and archive workflows.
 
 - `serviceAccount` and `backupServiceAccount`
-  Purpose: service account settings for the application and backup/restore workloads.
+  Purpose: identities for the application and the backup or restore workflows.
 
-## Operational Model
+## Operator model
 
-The intended operator workflow is:
+The intended operator model is:
 
-1. Install the chart.
-2. Allow the Vaultwarden `StatefulSet` to run normally.
-3. Use the backup `CronJob` to scale the application down and temporarily scale the Restic backup deployment up.
-4. Optionally enable the archive `CronJob` for the separate daily `rclone` plus `tar.gz` flow.
-5. Leave both restore-oriented deployments at `0` replicas until restoration is required.
-6. Scale one of the restore deployments to `1` only for manual restore work, then scale it back to `0`.
+1. install the chart with Vaultwarden, Restic, rclone, storage, ingress, and secret configuration
+2. run Vaultwarden normally from the persistent volume
+3. allow the Restic backup `CronJob` to protect the live Vaultwarden data directory on schedule
+4. optionally enable the archive `CronJob` to copy the remote Restic repository into S3
+5. leave both restore helpers scaled to `0` until restore work is required
+6. choose the restore helper based on the recovery source:
+   - `vaultwarden-backup` for zip-based restore
+   - Restic restore helper for snapshot restore from the remote Restic repository
