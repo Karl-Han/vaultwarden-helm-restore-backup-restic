@@ -2,6 +2,41 @@
 
 This repository combines Kubernetes deployment assets, a custom Restic helper image, and Terraform for object storage so that Vaultwarden can be run, backed up, restored, and archived with a repeatable workflow.
 
+## Dataflow
+
+The following lossy flowchart demonstrate rough idea on the data flow between instances.
+
+```mermaid
+flowchart LR
+    User[User or Client]
+    Vaultwarden[Vaultwarden StatefulSet]
+    PVC[Vaultwarden PVC /data]
+    ZipRestore[vaultwarden-backup restore deployment]
+    subgraph ResticHelpers[Restic helper deployments]
+        direction TB
+        ResticBackup[vaultwarden-restic-backup deployment]
+        ResticRestore[vaultwarden-restic-restore deployment]
+    end
+    ResticRepo[Remote Restic repository]
+    ArchiveJob[Archive with Compressed File CronJob]
+    S3Primary[AWS S3 primary bucket]
+    S3Replica[AWS S3 replica bucket]
+    Terraform[Terraform S3 and IAM setup]
+
+    User --> Vaultwarden
+    Vaultwarden <--> PVC
+    PVC --> ResticBackup
+    ResticBackup --> ResticRepo
+    ResticRepo --> ResticRestore
+    ResticRestore --> PVC
+    ZipRestore --> PVC
+    ResticRepo --> ArchiveJob
+    ArchiveJob --> S3Primary
+    Terraform --> S3Primary
+    Terraform --> S3Replica
+    S3Primary --> S3Replica
+```
+
 The project is organized around three main parts:
 
 ## 1. Helm chart for Vaultwarden, backup, restore, and archive workflows
