@@ -49,9 +49,9 @@ Fresh start
 
    At minimum, verify:
 
-   - ``vaultwarden.env.DOMAIN``
-   - ``vaultwarden.ingress.hosts``
-   - ``vaultwarden.ingress.tls``
+   - ``vaultwarden.domains``
+   - ``vaultwarden.ingress.path``
+   - ``vaultwarden.ingress.tls.secretName``
 
 2. Install the Helm chart with the required values for:
 
