@@ -32,7 +32,7 @@ For local prototyping, a built-in TLS secret may be used. This is a local-develo
 Local prototype workflow
 ------------------------
 
-1. Create a local TLS secret for Vaultwarden:
+1. Create a local TLS secret for Vaultwarden temporarily for testing purpose:
 
    .. code-block:: bash
 
@@ -74,6 +74,8 @@ Local prototype workflow
 
    This is required because ``/app/entrypoint.sh restore`` only searches ``/bitwarden/restore``.
 
+   In order to attach to the pod, you can execute: `kubectl exec -it pods/vw-dep-vaultwarden-backup-vaultwarden-backup-6bf6c896d8-d7gk7 -- bash`.
+
    Example restore command inside the pod:
 
    .. code-block:: bash
@@ -86,17 +88,28 @@ Local prototype workflow
 
    - https://github.com/ttionya/vaultwarden-backup
 
-7. If you need to restore from an existing Restic repository instead, build ``devops/Dockerfile.restic`` and run a restore-oriented helper pod based on the same mounting pattern as ``devops/k8s/deploy-vw-backup.yaml``.
+7. If you need to restore from an existing Restic repository instead, build ``devops/Dockerfile.restic`` 
+   and run a restore-oriented helper pod based on the same mounting pattern as ``devops/k8s/deploy-vw-backup.yaml``.
 
-   The intent is to pass the required environment variables and run:
+   Pass the required environment variables and run:
 
    .. code-block:: bash
 
       python /app/main.py restore
 
-   Note:
+   The restore command performs the same Kubernetes scaling orchestration as the backup command:
 
-   The current Python entrypoint in ``main.py`` implements the backup flow, not a restore subcommand yet. A restore-specific wrapper or command variant is still implied operational work.
+   1. validate the configured Vaultwarden data directory path
+   2. validate the rclone configuration path
+   3. validate the Restic password configuration
+   4. scale the target StatefulSet down to ``0``
+   5. run ``restic restore <snapshot> --target <restore-target> --include <data-dir>``
+   6. scale the StatefulSet back to its original replica count
+
+   By default, ``--snapshot`` is ``latest`` and ``--restore-target`` is ``/``.
+
+   This means the restore container filesystem and volume mounts must be arranged so that restoring ``/data`` 
+   back into ``/`` writes into the intended Vaultwarden PVC mount.
 
 8. Scale the Vaultwarden StatefulSet back to ``1`` for normal operation:
 
@@ -109,7 +122,7 @@ Local prototype workflow
 Runtime environment
 -------------------
 
-The backup image expects the environment variables defined in ``envrc.template``:
+The backup and restore image expects the environment variables defined in ``envrc.template``:
 
 - ``RESTIC_PASSWORD`` or ``RESTIC_PASSWORD_FILE``
 - ``VAULTWARDEN_NAMESPACE``
@@ -127,21 +140,24 @@ Python backup behavior
 
 The Python entrypoint performs the following flow:
 
-1. Validate the Vaultwarden data directory.
-2. Validate the existence of the rclone config file, defaulting to ``~/.config/rclone/rclone.conf``.
-3. Validate the Restic password configuration.
-4. Scale the target StatefulSet down to ``0`` using the Kubernetes Python client.
-5. Run ``restic backup`` against ``VW_DATA_DIR``.
-6. Run ``restic forget --prune`` with the configured retention policy.
-7. Scale the StatefulSet back to its original replica count.
+#. Validate 
+  - the Vaultwarden data directory path
+  - the existence of the rclone config file, defaulting to ``~/.config/rclone/rclone.conf``.
+  - the Restic password configuration.
+#. Scale the target StatefulSet down to ``0`` using the Kubernetes Python client.
+#. Run ``restic backup`` against ``VW_DATA_DIR``.
+#. Run ``restic forget --prune`` with the configured retention policy.
+#. Scale the StatefulSet back to its original replica count.
 
-Real deployment notes
----------------------
+Python restore behavior
+-----------------------
 
-The local TLS secret creation step is only for local development.
+The Python restore command performs the following flow:
 
-In a real deployment, TLS should be handled through Traefik and cert-manager. The expected direction is:
-
-- Traefik is already installed
-- ``kubectl get all -n cert-manager`` succeeds
-- ingress and certificate management are handled by cluster components instead of a manually created TLS secret
+#. Validate 
+  - the Vaultwarden data directory path.
+  - the existence of the rclone config file, defaulting to ``~/.config/rclone/rclone.conf``.
+  - the Restic password configuration.
+#. Scale the target StatefulSet down to ``0`` using the Kubernetes Python client.
+#. Run ``restic restore`` for the selected snapshot, using ``--target`` and ``--include`` for ``VW_DATA_DIR``.
+#. Scale the StatefulSet back to its original replica count.
