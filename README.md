@@ -52,8 +52,10 @@ The current Helm implementation under [devops/helm](/home/iwktd/k8s_deployments/
 - Restic backup `Deployment`: scheduled helper that mounts the PVC and runs `python /app/main.py backup` in an init container, scaled to `0` except while the CronJob is running
 - Restic restore `Deployment`: optional restore helper based on `devops/Dockerfile.restic`, scaled to `0` by default
 - backup `CronJob`: orchestration runner that scales Vaultwarden down, scales the Restic backup deployment up, waits for the backup init container to finish, then restores the steady state
+- archive `CronJob`: optional daily archive runner that copies a configured remote folder into a temporary `/data` workspace, creates a plain `tar.gz`, and uploads it to every target listed in `TARGETS` under `TARGET_PATH_PREFIX/YYYYMMDD.tar.gz`
 - rclone `Secret`: provides `rclone.conf` for the Restic `rclone:` backend
 - Restic env `Secret`: provides the runtime environment variables consumed by `main.py`
+- archive env `Secret`: provides `SOURCE_REMOTE_PATH`, `TARGETS`, and `TARGET_PATH_PREFIX` for the archive job
 
 ## Repository Layout
 

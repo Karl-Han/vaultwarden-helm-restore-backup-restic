@@ -143,3 +143,109 @@ spec:
               resources:
                 {{- toYaml .Values.vaultwardenRestic.cronjob.resources | nindent 16 }}
 {{- end }}
+---
+{{- if and .Values.vaultwardenArchive.enabled .Values.vaultwardenArchive.cronjob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "helm.archiveCronJobName" . }}
+  labels:
+    {{- include "helm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: archive
+spec:
+  schedule: {{ .Values.vaultwardenArchive.cronjob.schedule | quote }}
+  concurrencyPolicy: {{ .Values.vaultwardenArchive.cronjob.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.vaultwardenArchive.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.vaultwardenArchive.cronjob.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "helm.labels" . | nindent 12 }}
+            app.kubernetes.io/component: archive
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: {{ .Values.vaultwardenArchive.cronjob.restartPolicy }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: archive
+              image: "{{ .Values.vaultwardenArchive.image.repository }}:{{ .Values.vaultwardenArchive.image.tag }}"
+              imagePullPolicy: {{ .Values.vaultwardenArchive.image.pullPolicy }}
+              {{- with .Values.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              command:
+                - /bin/sh
+                - -ec
+              args:
+                - |
+                  set -eu
+
+                  test -n "${SOURCE_REMOTE_PATH}"
+                  test -n "${TARGETS}"
+                  test -n "${TARGET_PATH_PREFIX}"
+                  test -f "${RCLONE_CONFIG}"
+
+                  dated_name="restic-$(date -u +%Y%m%d).tar.gz"
+                  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+                  stage_dir="/data/source-${timestamp}"
+                  archive_file="/data/${dated_name}"
+
+                  cleanup() {
+                    rm -rf "${stage_dir}" "${archive_file}"
+                  }
+
+                  trap cleanup EXIT
+
+                  mkdir -p "${stage_dir}"
+                  rclone copy "${SOURCE_REMOTE_PATH}" "${stage_dir}"
+                  tar -C /data -czf "${archive_file}" "$(basename "${stage_dir}")"
+
+                  old_ifs="${IFS}"
+                  IFS=','
+                  for target in ${TARGETS}; do
+                    target="$(printf '%s' "${target}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+                    if [ -n "${target}" ]; then
+                      rclone copyto "${archive_file}" "${target}${TARGET_PATH_PREFIX}/${dated_name}" --s3-no-check-bucket
+                    fi
+                  done
+                  IFS="${old_ifs}"
+              envFrom:
+                - secretRef:
+                    name: {{ include "helm.archiveEnvSecretName" . }}
+              volumeMounts:
+                - name: archive-workdir
+                  mountPath: /data
+                - name: rclone-config
+                  mountPath: {{ dir .Values.rclone.configPath }}
+                  readOnly: true
+              resources:
+                {{- toYaml .Values.vaultwardenArchive.cronjob.resources | nindent 16 }}
+          volumes:
+            - name: archive-workdir
+              emptyDir: {}
+            - name: rclone-config
+              secret:
+                secretName: {{ .Values.rclone.secret.name }}
+{{- end }}

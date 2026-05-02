@@ -48,6 +48,9 @@ The chart contains these main components:
 - backup `CronJob`
   Purpose: scheduled control-plane runner that scales Vaultwarden down, scales the Restic backup deployment up, waits for the init-container backup to finish, then scales everything back to the steady state.
 
+- archive `CronJob`
+  Purpose: scheduled archive runner that copies a remote folder into a temporary local `/data` workspace, creates a plain `tar.gz`, and uploads it to every rclone target listed in `TARGETS` under `TARGET_PATH_PREFIX/YYYYMMDD.tar.gz`.
+
 - rclone config `Secret`
   Purpose: provide `rclone.conf` for Restic's `rclone:` backend.
 
@@ -84,10 +87,10 @@ The chart contains these main components:
   Purpose: the `vaultwarden-backup` helper deployment, the Restic backup deployment, and the Restic restore deployment.
 
 - `templates/cronjob.yaml`
-  Purpose: scheduled backup orchestration job.
+  Purpose: scheduled backup orchestration job and scheduled archive job.
 
 - `templates/secrets.yaml`
-  Purpose: rclone config secret and Restic environment secret.
+  Purpose: rclone config secret, Restic environment secret, and archive environment secret.
 
 - `templates/NOTES.txt`
   Purpose: post-install notes for operators.
@@ -105,6 +108,9 @@ The main value groups are:
 - `vaultwardenRestic`
   Purpose: settings for the custom Restic image, backup deployment, restore deployment, cronjob schedule, and runtime environment.
 
+- `vaultwardenArchive`
+  Purpose: settings for the daily archive CronJob, including the source remote path, comma-separated upload targets, and the shared destination path prefix.
+
 - `rclone`
   Purpose: location and content of `rclone.conf`.
 
@@ -118,5 +124,6 @@ The intended operator workflow is:
 1. Install the chart.
 2. Allow the Vaultwarden `StatefulSet` to run normally.
 3. Use the backup `CronJob` to scale the application down and temporarily scale the Restic backup deployment up.
-4. Leave both restore-oriented deployments at `0` replicas until restoration is required.
-5. Scale one of the restore deployments to `1` only for manual restore work, then scale it back to `0`.
+4. Optionally enable the archive `CronJob` for the separate daily `rclone` plus `tar.gz` flow.
+5. Leave both restore-oriented deployments at `0` replicas until restoration is required.
+6. Scale one of the restore deployments to `1` only for manual restore work, then scale it back to `0`.

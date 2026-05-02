@@ -105,6 +105,14 @@ Create the name of the service account to use
 {{- printf "%s-restic-env" (include "helm.fullname" .) -}}
 {{- end }}
 
+{{- define "helm.archiveEnvSecretName" -}}
+{{- printf "%s-archive-env" (include "helm.fullname" .) -}}
+{{- end }}
+
 {{- define "helm.backupRoleName" -}}
 {{- printf "%s-backup" (include "helm.fullname" .) -}}
+{{- end }}
+
+{{- define "helm.archiveCronJobName" -}}
+{{- printf "%s-archive" (include "helm.fullname" .) -}}
 {{- end }}

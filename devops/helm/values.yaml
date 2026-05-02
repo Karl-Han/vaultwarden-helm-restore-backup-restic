@@ -242,6 +242,40 @@ vaultwardenRestic:
     # Resource requests and limits for the CronJob container.
     resources: {}
 
+vaultwardenArchive:
+  # Optional daily archive job that copies a remote folder locally,
+  # creates a plain tar.gz archive, and uploads it to multiple rclone targets.
+  enabled: false
+  image:
+    # Repository for the archive job image. It must contain rclone and tar.
+    repository: docker.io/iwktd/vaultwarden-restic-backup
+    # Tag for the archive job image.
+    tag: latest
+    # Pull policy for the archive job image.
+    pullPolicy: IfNotPresent
+  env:
+    # Source rclone path copied into the local temporary /data workspace.
+    SOURCE_REMOTE_PATH: "remote-webdav:restic-backup"
+    # Comma-separated destination rclone remote roots that receive the tar.gz file.
+    TARGETS: "aws-s3:bucket-name"
+    # Path prefix appended under each remote root before the dated filename.
+    TARGET_PATH_PREFIX: "vaultwarden-archive"
+  cronjob:
+    # Enable the daily archive CronJob.
+    enabled: true
+    # Standard cron expression for the archive job.
+    schedule: "0 3 * * *"
+    # Prevent overlapping archive runs.
+    concurrencyPolicy: Forbid
+    # Number of successful Jobs to keep.
+    successfulJobsHistoryLimit: 1
+    # Number of failed Jobs to keep.
+    failedJobsHistoryLimit: 3
+    # Pod restart policy for failed archive pods.
+    restartPolicy: OnFailure
+    # Resource requests and limits for the archive container.
+    resources: {}
+
 rclone:
   # rclone configuration mounted for restic's rclone backend.
   # This should match the location expected by the Python entrypoint and restic.
@@ -259,3 +293,10 @@ rclone:
       vendor = other
       user = username
       pass = password
+
+      [aws-s3]
+      type = s3
+      provider = AWS
+      access_key_id = 
+      secret_access_key = 
+      region = us-east-1
